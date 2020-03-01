@@ -8,6 +8,7 @@
 				<List class='self' method='get_calendars'/>
 			</Field>
 			<Field id='SupportsStatusRequest' type='checkbox' defaultValue='true' hidden='true'/>
+			<Field id='allowOnStateChange' type='checkbox' defaultValue='false' hidden='true'/>
 		</ConfigUI>
 		<UiDisplayStateId>display</UiDisplayStateId>
 		<States>
@@ -15,6 +16,11 @@
 				<ValueType>String</ValueType>
 				<TriggerLabel>Event Data</TriggerLabel>
 				<ControlPageLabel>Event Data</ControlPageLabel>
+			</State>
+			<State id='event_count'>
+				<ValueType>Number</ValueType>
+				<TriggerLabel>Event Count</TriggerLabel>
+				<ControlPageLabel>Event Count</ControlPageLabel>
 			</State>
 			<State id='last_download'>
 				<ValueType>String</ValueType>

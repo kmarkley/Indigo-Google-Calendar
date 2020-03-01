@@ -22,9 +22,6 @@ try:
 except ImportError:
     MODULES_INSTALLED = False
 
-
-# Note the "indigo" module is automatically imported and made available inside
-# our global name space by the host process.
 ###############################################################################
 # globals
 
@@ -34,7 +31,7 @@ CREDENTIAL_FILENAME = 'google_calendar_credential.json'
 
 LOOK_BACK_DAYS = 7
 LOOK_AHEAD_DAYS = 30
-IGNORE_AFTER_MINUTES = 60
+TOO_LATE_AFTER_MINUTES = 60
 
 ################################################################################
 class Plugin(indigo.PluginBase):
@@ -48,7 +45,8 @@ class Plugin(indigo.PluginBase):
         self.credentials_path = os.path.join(credential_dir, CREDENTIAL_FILENAME)
         self.credentials = None
 
-        self.triggersDict = dict()
+        self.device_dict = dict()
+        self.trigger_dict = dict()
 
     #-------------------------------------------------------------------------------
     def __del__(self):
@@ -70,15 +68,20 @@ class Plugin(indigo.PluginBase):
             self.get_credentials()
             self.calendar_api = build('calendar', 'v3', credentials=self.credentials)
 
-        self.fired_trigger_dict = json.loads(self.pluginPrefs.get('firedTriggers','{}'))
+        self.fired_trigger_dict = dict()
+        temp_dict = json.loads(self.pluginPrefs.get('firedTriggers','{}'))
+        for key,value in temp_dict.items():
+            self.fired_trigger_dict[int(key)] = value
 
-        self.device_dict = dict()
-        self.trigger_dict = dict()
+        self.devices_updated = False
         self.last_device_update = time.time()
 
     #-------------------------------------------------------------------------------
     def shutdown(self):
         self.pluginPrefs['debug_logging'] = self.debug
+        for trigger_id,trigger in self.trigger_dict.items():
+            self.fired_trigger_dict[trigger_id] = trigger.fired_trigger_list
+            self.logger.debug(u'{} {}'.format(trigger_id,trigger.fired_trigger_list))
         self.pluginPrefs['firedTriggers'] = json.dumps(self.fired_trigger_dict)
 
     #-------------------------------------------------------------------------------
@@ -99,7 +102,6 @@ class Plugin(indigo.PluginBase):
 
     #-------------------------------------------------------------------------------
     def runConcurrentThread(self):
-        devices_updated = False
         try:
             while True:
                 loop_time = time.time()
@@ -107,11 +109,11 @@ class Plugin(indigo.PluginBase):
                     for device in self.device_dict.values():
                         device.update()
                     self.last_device_update = loop_time
-                    devices_updated = True
+                    self.devices_updated = True
                 for trigger in self.trigger_dict.values():
-                    trigger.queue_evaluation(devices_updated)
+                    trigger.queue_evaluation(self.devices_updated)
                 self.sleep(60)
-                devices_updated = False
+                self.devices_updated = False
         except self.StopThread:
             pass
 
@@ -201,6 +203,7 @@ class Plugin(indigo.PluginBase):
         if action.deviceAction == indigo.kUniversalAction.RequestStatus:
             self.logger.info('"{}" status update'.format(device.name))
             instance.update()
+            self.devices_updated
         # UNKNOWN
         else:
             self.logger.debug(u'"{}" {} request ignored'.format(dev.name, action.deviceAction))
@@ -264,13 +267,15 @@ class GoogleCalendarDevice(object):
     def __init__(self, device, calendar_api, logger):
         self.device = device
         self.states = device.states
-        self.events = json.loads(self.states['event_data'])
+        if self.states['event_data']:
+            self.events = json.loads(self.states['event_data'])
+        else:
+            self.events = dict()
 
         self.calendar_api = calendar_api
         self.logger = logger
 
         self.calendar_id = device.pluginProps['calendarID']
-        self.update_freq = int(device.pluginProps['updateFrequency'])*60
 
         self.update()
 
@@ -309,11 +314,14 @@ class GoogleCalendarDevice(object):
                     del self.events[event_id]
 
             self.states['event_data']    = json.dumps(self.events)
+            self.states['event_count']   = len(self.events)
             self.states['last_download'] = datetime.now().isoformat()
             self.states['online']        = True
+            self.states['onOffState']    = True
             self.logger.info(u'Successfully updated calendar device "{}"'.format(self.device.name))
         except:
             self.states['online']        = False
+            self.states['onOffState']    = False
             self.logger.error(u'Failed to update calendar device "{}"'.format(self.device.name))
         self.device.updateStatesOnServer([{'key':key,'value':value} for key,value in self.states.items()])
 
@@ -340,8 +348,7 @@ class GoogleCalendarTrigger(threading.Thread):
 
         self.logger       = logger
 
-        # self.fired_trigger_list = fired_trigger_list
-        self.fired_trigger_list = []
+        self.fired_trigger_list = fired_trigger_list
         self._events = dict()
         self.device_updated = True
         self.task_time = datetime.now()
@@ -373,29 +380,33 @@ class GoogleCalendarTrigger(threading.Thread):
     def queue_evaluation(self, device_updated=False):
         if device_updated:
             self.device_updated = True
-        # self.queue.put('evaluate')
-        # temporarily bypass queueing
-        self.do_evaluation()
+        self.queue.put('evaluate')
 
     #-------------------------------------------------------------------------------
     def do_evaluation(self):
         # now = datetime.now()
         #https://stackoverflow.com/questions/4530069/how-do-i-get-a-value-of-datetime-today-in-python-that-is-timezone-aware/4530166#4530166
         now = datetime.now(pytz.utc)
-        events = self.events
-        for event_id,event in events.items():
+        ct_pending = ct_matched = ct_too_late = ct_fired = 0
+        for event_id,event in self.events.items():
             # each trigger should only fire once per event
             if event_id not in self.fired_trigger_list:
+                ct_pending += 1
                 # search for text
                 if self.search_words in event[self.search_field]:
+                    ct_matched += 1
                     # check the time
                     time_event = dateutil.parser.parse(event[self.time_field])
                     time_to_fire = time_event - timedelta(minutes=self.time_count)
-                    time_to_ignore = time_to_fire + timedelta(minutes=IGNORE_AFTER_MINUTES)
-                    if (now >= time_to_fire) and not (now >= time_to_ignore):
+                    time_too_late = time_to_fire + timedelta(minutes=TOO_LATE_AFTER_MINUTES)
+                    if (now >= time_too_late):
+                        ct_too_late += 1
+                    elif (now >= time_to_fire):
+                        ct_fired += 1
                         self.logger.debug(u'Fire trigger "{}" for event "{}"'.format(self.name,event['summary']))
                         self.fired_trigger_list.append(event_id)
                         indigo.trigger.execute(self.id)
+        self.logger.debug(u'Trigger "{}": {} events, {} pending, {} matched, {} too late, {} fired'.format(self.name,len(self.events),ct_pending,ct_matched,ct_too_late,ct_fired))
 
 
     #-------------------------------------------------------------------------------
@@ -418,9 +429,3 @@ class GoogleCalendarTrigger(threading.Thread):
 ################################################################################
 # Utilities
 ################################################################################
-
-def zint(value):
-    try:
-        return int(value)
-    except:
-        return 0
