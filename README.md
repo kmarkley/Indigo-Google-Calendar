@@ -27,8 +27,8 @@ sudo pip install --upgrade google-api-python-client google-auth-httplib2 google-
 
 #### 3. Install the plugin
 You will get an error:
-    + If the error says you need to install modules, go back and fix step 2
-    + If the error says you need to copy a file, you're ok for now.
++ If the error says you need to install modules, go back and fix step 2
++ If the error says you need to copy a file, you're ok for now.
 
 #### 4. Move the credential file downloaded above
 + Rename the file 'google_calendar_client_configuration.json'
