@@ -1,0 +1,12 @@
+<?xml version='1.0'?>
+<MenuItems>
+    <MenuItem id='authorizeAccess'>
+        <Name>Authorize Access</Name>
+        <CallbackMethod>complete_oauth_flow</CallbackMethod>
+    </MenuItem>
+    <MenuItem id='debugSeperator' type='separator' />
+    <MenuItem id='toggleDebug'>
+        <Name>Toggle Debugging</Name>
+		<CallbackMethod>toggle_debug</CallbackMethod>
+	</MenuItem>
+</MenuItems>

@@ -1,0 +1,38 @@
+<?xml version='1.4'?>
+<Events>
+	<Event type='custom' id='GoogleCalendarEvent'>
+		<Name>Google Calendar Event</Name>
+		<ConfigUI>
+			<Field id='calendarID' type='menu'>
+				<Label>Calendar:</Label>
+				<List class='indigo.devices' filter='self'/>
+			</Field>
+			<Field id='searchWords' type='textfield'>
+				<Label>Search words:</Label>
+			</Field>
+			<Field id='searchField' type='menu' defaultValue='summary'>
+				<Label>Field:</Label>
+				<List>
+					<Option value='summary'>Summary</Option>
+					<Option value='description'>Description</Option>
+				</List>
+			</Field>
+			<Field id='searchHelp' type='label' fontColor='darkgray' fontSize='small' alignWithControl='true'>
+				<Label>Leave blank to trigger on every event.</Label>
+			</Field>
+			<Field id='timeCount' type='textfield' defaultValue='15'>
+				<Label>Minutes Before:</Label>
+			</Field>
+			<Field id='timeField' type='menu' defaultValue='start'>
+				<Label>Field:</Label>
+				<List>
+					<Option value='start'>Start</Option>
+					<Option value='end'>End</Option>
+				</List>
+			</Field>
+			<Field id='timeHelp' type='label' fontColor='darkgray' fontSize='small' alignWithControl='true'>
+                <Label>Use a negative value to trigger after the start/end time.</Label>
+            </Field>
+		</ConfigUI>
+	</Event>
+</Events>

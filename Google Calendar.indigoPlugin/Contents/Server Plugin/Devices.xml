@@ -1,0 +1,31 @@
+<?xml version='1.0'?>
+<Devices>
+	<Device type='sensor' id='GoogleCalendar'>
+		<Name>Google Calendar</Name>
+		<ConfigUI>
+			<Field id='calendarID' type='menu'>
+				<Label>Calendar ID:</Label>
+				<List class='self' method='get_calendars'/>
+			</Field>
+			<Field id='SupportsStatusRequest' type='checkbox' defaultValue='true' hidden='true'/>
+		</ConfigUI>
+		<UiDisplayStateId>display</UiDisplayStateId>
+		<States>
+			<State id='event_data'>
+				<ValueType>String</ValueType>
+				<TriggerLabel>Event Data</TriggerLabel>
+				<ControlPageLabel>Event Data</ControlPageLabel>
+			</State>
+			<State id='last_download'>
+				<ValueType>String</ValueType>
+				<TriggerLabel>Last Downlaod was</TriggerLabel>
+				<ControlPageLabel>Last Download</ControlPageLabel>
+			</State>
+			<State id='online'>
+				<ValueType>Boolean</ValueType>
+				<TriggerLabel>Online State Is</TriggerLabel>
+				<ControlPageLabel>Online</ControlPageLabel>
+			</State>
+		</States>
+	</Device>
+</Devices>
