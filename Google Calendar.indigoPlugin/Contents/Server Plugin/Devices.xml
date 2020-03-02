@@ -1,11 +1,11 @@
 <?xml version='1.0'?>
 <Devices>
 	<Device type='sensor' id='GoogleCalendar'>
-		<Name>Google Calendar</Name>
+		<Name>Google Calendar Device</Name>
 		<ConfigUI>
 			<Field id='calendarID' type='menu'>
 				<Label>Calendar ID:</Label>
-				<List class='self' method='get_calendars'/>
+				<List class='self' method='list_calendars'/>
 			</Field>
 			<Field id='SupportsStatusRequest' type='checkbox' defaultValue='true' hidden='true'/>
 			<Field id='allowOnStateChange' type='checkbox' defaultValue='false' hidden='true'/>

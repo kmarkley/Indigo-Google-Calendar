@@ -31,7 +31,12 @@ CREDENTIAL_FILENAME = 'google_calendar_credential.json'
 
 LOOK_BACK_DAYS = 7
 LOOK_AHEAD_DAYS = 30
-TOO_LATE_AFTER_MINUTES = 60
+
+INITIALIZE_RETRY_MINUTES = 30.0
+CALENDAR_LIST_UPDATE_HOURS = 4.0
+DOWNLOAD_EVENTS_MINUTES = 60.0
+TRIGGER_LOOP_SECONDS = 60.0
+TOO_LATE_AFTER_MINUTES = 60.0
 
 ################################################################################
 class Plugin(indigo.PluginBase):
@@ -44,9 +49,15 @@ class Plugin(indigo.PluginBase):
         self.client_config_path = os.path.join(credential_dir, CLIENT_CONFIG_FILENAME)
         self.credentials_path = os.path.join(credential_dir, CREDENTIAL_FILENAME)
         self.credentials = None
+        self.calendar_api = None
 
         self.device_dict = dict()
+        self.calendar_dict = dict()
         self.trigger_dict = dict()
+        self.fired_trigger_dict = dict()
+
+        self._authorized = False
+        self._initialized = False
 
     #-------------------------------------------------------------------------------
     def __del__(self):
@@ -64,24 +75,14 @@ class Plugin(indigo.PluginBase):
             self.stopPlugin('Install the Google API Client python modules before using this plugin.  See README for details.', isError=True)
         elif not os.path.exists(self.client_config_path):
             self.stopPlugin('Copy the client configuration file to plugin directory before using this plugin.  See README for details.', isError=True)
-        else:
-            self.get_credentials()
-            self.calendar_api = build('calendar', 'v3', credentials=self.credentials)
 
-        self.fired_trigger_dict = dict()
         temp_dict = json.loads(self.pluginPrefs.get('firedTriggers','{}'))
         for key,value in temp_dict.items():
             self.fired_trigger_dict[int(key)] = value
 
-        self.devices_updated = False
-        self.last_device_update = time.time()
-
     #-------------------------------------------------------------------------------
     def shutdown(self):
         self.pluginPrefs['debug_logging'] = self.debug
-        for trigger_id,trigger in self.trigger_dict.items():
-            self.fired_trigger_dict[trigger_id] = trigger.fired_trigger_list
-            self.logger.debug(u'{} {}'.format(trigger_id,trigger.fired_trigger_list))
         self.pluginPrefs['firedTriggers'] = json.dumps(self.fired_trigger_dict)
 
     #-------------------------------------------------------------------------------
@@ -102,20 +103,48 @@ class Plugin(indigo.PluginBase):
 
     #-------------------------------------------------------------------------------
     def runConcurrentThread(self):
+        next_initialize_retry = 0
+        next_calendar_list_update = 0
         try:
             while True:
                 loop_time = time.time()
-                if loop_time > self.last_device_update + 60*60:
-                    for device in self.device_dict.values():
-                        device.update()
-                    self.last_device_update = loop_time
-                    self.devices_updated = True
+
+                if not self.initialized:
+                    # confirm API initialization
+                    if loop_time > next_initialize_retry:
+                        if not self.initialize_api_client():
+                            # only schedule retry if initialation failed
+                            next_initialize_retry = loop_time + INITIALIZE_RETRY_MINUTES*60
+
+                if self.initialized:
+                    # update list of calendars
+                    if loop_time > next_calendar_list_update:
+                        self.get_calendars()
+                        next_calendar_list_update = loop_time + CALENDAR_LIST_UPDATE_HOURS*60*60
+
+                    # update calendar devices
+                    for instance_id, device_instance in self.device_dict.items():
+                        if loop_time > device_instance.last_update + DOWNLOAD_EVENTS_MINUTES*60:
+                            device_instance.update()
+                            self.reloadTriggerCalendar(instance_id)
+
+                # evaluate triggers
                 for trigger in self.trigger_dict.values():
-                    trigger.queue_evaluation(self.devices_updated)
-                self.sleep(60)
-                self.devices_updated = False
+                    trigger.queue_evaluation()
+
+                self.sleep(TRIGGER_LOOP_SECONDS - (time.time() - loop_time))
+
         except self.StopThread:
             pass
+
+    #-------------------------------------------------------------------------------
+    def toggle_debug(self):
+        if self.debug:
+            self.logger.debug('Debug logging disabled')
+            self.debug = False
+        else:
+            self.debug = True
+            self.logger.debug('Debug logging enabled')
 
     #-------------------------------------------------------------------------------
     # device methods
@@ -123,7 +152,7 @@ class Plugin(indigo.PluginBase):
     def deviceStartComm(self, device):
         if device.configured:
             if device.deviceTypeId == 'GoogleCalendar':
-                self.device_dict[device.id] = GoogleCalendarDevice(device, self.calendar_api, self.logger)
+                self.device_dict[device.id] = GoogleCalendarDevice(device, self.get_events, self.logger)
 
     #-------------------------------------------------------------------------------
     def deviceStopComm(self, device):
@@ -138,26 +167,16 @@ class Plugin(indigo.PluginBase):
             errorsDict['calendarID'] = 'Required'
 
         if len(errorsDict) > 0:
-            self.logger.debug(u'validate device config error: \n{}'.format(errorsDict))
             return (False, valuesDict, errorsDict)
-        return (True, valuesDict)
+        else:
+            valuesDict['address'] = valuesDict['calendarID']
+            valuesDict['calendarName'] = self.calendar_dict.get(valuesDict['calendarID'],'')
+            return (True, valuesDict)
 
     #-------------------------------------------------------------------------------
     # device config callback
-    def get_calendars(self, filter=None, valuesDict=None, typeId='', targetId=0):
-        if self.authorized:
-            page_token = None
-            calendar_ids = []
-            while True:
-                calendar_list = self.calendar_api.calendarList().list(pageToken=page_token).execute()
-                for calendar_list_entry in calendar_list['items']:
-                    calendar_ids.append((calendar_list_entry['id'],calendar_list_entry['summary']))
-                page_token = calendar_list.get('nextPageToken')
-                if not page_token:
-                    break
-            return calendar_ids
-        else:
-            return[(0,u'**Account Offline**')]
+    def list_calendars(self, filter=None, valuesDict=None, typeId='', targetId=0):
+        return [(key,value) for key,value in self.calendar_dict.items()]
 
     #-------------------------------------------------------------------------------
     # trigger methods
@@ -169,7 +188,7 @@ class Plugin(indigo.PluginBase):
 
     #-------------------------------------------------------------------------------
     def triggerStopProcessing(self, trigger):
-        if trigger.id in self.triggersDict:
+        if trigger.id in self.trigger_dict:
             instance = self.trigger_dict[trigger.id]
             self.fired_trigger_dict[trigger.id] = instance.fired_trigger_list
             instance.cancel()
@@ -191,7 +210,25 @@ class Plugin(indigo.PluginBase):
         if len(errorsDict) > 0:
             return (False, valuesDict, errorsDict)
         else:
+            valuesDict['searchWords'] = valuesDict['searchWords'].lower()
+            if float(valuesDict.get('timeCount','0')) == 0.0:
+                time_desc = u'at {}'.format(valuesDict['timeField'])
+            else:
+                time_logic = 'before' if float(valuesDict['timeCount']) >= 0.0 else 'after'
+                time_desc = u'{}min {} {}'.format(abs(float(valuesDict['timeCount'])),time_logic,valuesDict['timeField'])
+            if valuesDict['searchWords']:
+                event_desc = u'events with "{}" in {}'.format(valuesDict['searchWords'],valuesDict['searchField'])
+            else:
+                event_desc = u'all events'
+            calendar_name = indigo.devices[int(valuesDict['calendarID'])].name
+            valuesDict['description'] = u'{} of {} from device "{}"'.format(time_desc,event_desc,calendar_name)
             return (True, valuesDict)
+
+    #-------------------------------------------------------------------------------
+    def reloadTriggerCalendar(self, device_id=None):
+        for instance in self.trigger_dict.values():
+            if (device_id == None) or (device_id == instance.calendar_id):
+                instance.reload_calendar = True
 
     #-------------------------------------------------------------------------------
     # action control
@@ -203,43 +240,47 @@ class Plugin(indigo.PluginBase):
         if action.deviceAction == indigo.kUniversalAction.RequestStatus:
             self.logger.info('"{}" status update'.format(device.name))
             instance.update()
-            self.devices_updated
+            self.reloadTriggerCalendar(device.id)
         # UNKNOWN
         else:
             self.logger.debug(u'"{}" {} request ignored'.format(dev.name, action.deviceAction))
 
     #-------------------------------------------------------------------------------
-    # menu methods
-    #-------------------------------------------------------------------------------
-    def toggle_debug(self):
-        self.logger.info('toggle_debug')
-        self.logger.info(str(self.debug))
-        if self.debug:
-            self.logger.debug('Debug logging disabled')
-            self.debug = False
-        else:
-            self.debug = True
-            self.logger.debug('Debug logging enabled')
-        self.logger.info(str(self.debug))
-
-    #-------------------------------------------------------------------------------
     # Google API credentials
+    #-------------------------------------------------------------------------------
+    def initialize_api_client(self):
+        try:
+            self.get_credentials()
+            self.calendar_api = build('calendar', 'v3', credentials=self.credentials)
+            self.initialized = True
+        except Exception as e:
+            self.logger.error('Google API client failed to initialize')
+            self.logger.debug(u'{}: {}'.format(type(e),e))
+            self.initialized = False
+        return self.initialized
+
     #-------------------------------------------------------------------------------
     def get_credentials(self):
         if os.path.exists(self.credentials_path):
             with open(self.credentials_path, 'rb') as token:
                 self.credentials = pickle.load(token)
-        if self.credentials and self.credentials.valid:
-            self.authorized = True
-            self.logger.info('Credentials valid')
-        elif self.credentials and self.credentials.expired and self.credentials.refresh_token:
-            self.credentials.refresh(Request())
-            self.logger.info('Credentials refreshed')
-            self.save_credentials()
-            self.authorized = True
-        else:
+        try:
+            if self.credentials and self.credentials.valid:
+                self.logger.info('Google API credentials valid')
+                self.authorized = True
+            elif self.credentials and self.credentials.expired and self.credentials.refresh_token:
+                self.credentials.refresh(Request())
+                self.logger.info('Google API credentials refreshed')
+                self.save_credentials()
+                self.authorized = True
+            else:
+                self.authorized = False
+                self.logger.error('Complete Oauth flow by selecting "Authorize Access" from plugin menu.')
+        except Exception as e:
+            self.logger.error(u'Error obtaining Google API credentials')
             self.authorized = False
-            self.logger.error('Complete Oauth flow by selecting "Authorize Access" from plugin menu')
+            self.logger.debug(u'{}: {}'.format(type(e),e))
+
 
     #-------------------------------------------------------------------------------
     def complete_oauth_flow(self):
@@ -247,16 +288,75 @@ class Plugin(indigo.PluginBase):
             try:
                 flow = InstalledAppFlow.from_client_secrets_file(self.client_config_path, SCOPES)
                 self.credentials = flow.run_local_server(port=0)
+                self.logger.info('Google API Oauth flow completed')
                 self.save_credentials()
                 self.authorized = True
-            except:
-                self.logger.error('Unable to complete Oauth flow')
+            except Exception as e:
+                self.logger.error('Google API Oauth flow failed')
+                self.logger.debug(u'{}: {}'.format(type(e),e))
+        else:
+            self.logger.info('Google API Oauth flow not needed')
 
     #-------------------------------------------------------------------------------
     def save_credentials(self):
         with open(self.credentials_path, 'wb') as token:
             pickle.dump(self.credentials, token)
-        self.logger.info('Storing credentials to ' + self.credentials_path)
+        self.logger.info('Google API credentials stored in {}'.format(self.credentials_path))
+
+    #-------------------------------------------------------------------------------
+    def get_calendars(self):
+        try:
+            page_token = None
+            calendar_ids = []
+            while True:
+                calendar_list = self.calendar_api.calendarList().list(pageToken=page_token).execute()
+                for calendar_list_entry in calendar_list['items']:
+                    self.calendar_dict[calendar_list_entry['id']] = calendar_list_entry['summary']
+                page_token = calendar_list.get('nextPageToken')
+                if not page_token:
+                    break
+            self.logger.info(u'Downloaded list of {} available calendars'.format(len(self.calendar_dict)))
+        except Exception as e:
+            self.logger.error(u'Failed to download list of available calendars')
+            self.logger.debug(u'{}: {}'.format(type(e),e))
+            self.initialized = False
+
+    #-------------------------------------------------------------------------------
+    def get_events(self, calendar_id, look_back, look_ahead):
+        try:
+            return self.calendar_api.events().list(calendarId=calendar_id,
+                                                   timeMin=look_back,
+                                                   timeMax=look_ahead,
+                                                   singleEvents=True,
+                                                   orderBy='startTime').execute()
+        except Exception as e:
+            self.logger.error(u'Failed to download events')
+            self.logger.debug(u'{}: {}'.format(type(e),e))
+            self.initialized = False
+
+    #-------------------------------------------------------------------------------
+    def _authorized_get(self):
+        return self._authorized
+    def _authorized_set(self, value):
+        if value != self._authorized:
+            self._authorized = value
+            if value:
+                self.logger.info(u'Google API access authorized')
+            else:
+                self.logger.error(u'Google API access not authorized')
+    authorized = property(_authorized_get, _authorized_set)
+
+    #-------------------------------------------------------------------------------
+    def _initialized_get(self):
+        return self._initialized
+    def _initialized_set(self, value):
+        if value != self._initialized:
+            self._initialized = value
+            if value:
+                self.logger.info(u'Google API access initialized')
+            else:
+                self.logger.error(u'Google API access not initialized')
+    initialized = property(_initialized_get, _initialized_set)
 
 ################################################################################
 # Classes
@@ -264,7 +364,7 @@ class Plugin(indigo.PluginBase):
 class GoogleCalendarDevice(object):
 
     #-------------------------------------------------------------------------------
-    def __init__(self, device, calendar_api, logger):
+    def __init__(self, device, get_events, logger):
         self.device = device
         self.states = device.states
         if self.states['event_data']:
@@ -272,12 +372,13 @@ class GoogleCalendarDevice(object):
         else:
             self.events = dict()
 
-        self.calendar_api = calendar_api
+        self.get_events = get_events
         self.logger = logger
 
         self.calendar_id = device.pluginProps['calendarID']
+        self.calendar_name = device.pluginProps['calendarName']
 
-        self.update()
+        self.last_update = 0
 
     #-------------------------------------------------------------------------------
     def update(self):
@@ -285,11 +386,7 @@ class GoogleCalendarDevice(object):
             now = datetime.utcnow()
             look_back  = (now - timedelta(days=LOOK_BACK_DAYS )).isoformat() + 'Z' # 'Z' indicates UTC time
             look_ahead = (now + timedelta(days=LOOK_AHEAD_DAYS)).isoformat() + 'Z' # 'Z' indicates UTC time
-            events_result = self.calendar_api.events().list(calendarId=self.calendar_id,
-                                                            timeMin=look_back,
-                                                            timeMax=look_ahead,
-                                                            singleEvents=True,
-                                                            orderBy='startTime').execute()
+            events_result = self.get_events(self.calendar_id, look_back, look_ahead)
 
             # update event data
             id_list = list()
@@ -300,8 +397,8 @@ class GoogleCalendarDevice(object):
                     self.events[event_id] = dict()
                 self.events[event_id]['start']       = event['start'].get('dateTime', event['start'].get('date'))
                 self.events[event_id]['end']         = event['end'].get('dateTime', event['end'].get('date'))
-                self.events[event_id]['summary']     = event.get('summary','')
-                self.events[event_id]['description'] = event.get('description','')
+                self.events[event_id]['summary']     = event.get('summary','').lower()
+                self.events[event_id]['description'] = event.get('description','').lower()
                 self.events[event_id]['status']      = event.get('status','')
                 self.events[event_id]['kind']        = event.get('kind','')
                 self.events[event_id]['htmlLink']    = event.get('htmlLink','')
@@ -318,13 +415,14 @@ class GoogleCalendarDevice(object):
             self.states['last_download'] = datetime.now().isoformat()
             self.states['online']        = True
             self.states['onOffState']    = True
-            self.logger.info(u'Successfully updated calendar device "{}"'.format(self.device.name))
-        except:
+            self.logger.info(u'Downloaded {} events from calendar "{}" for device "{}"'.format(len(self.events),self.calendar_name, self.device.name))
+        except Exception as e:
             self.states['online']        = False
             self.states['onOffState']    = False
-            self.logger.error(u'Failed to update calendar device "{}"'.format(self.device.name))
+            self.logger.error(u'Failed to download events from calendar "{}" for device "{}"'.format(self.calendar_name, self.device.name))
+            self.logger.debug(u'{}: {}'.format(type(e),e))
         self.device.updateStatesOnServer([{'key':key,'value':value} for key,value in self.states.items()])
-
+        self.last_update = time.time()
 
 ################################################################################
 class GoogleCalendarTrigger(threading.Thread):
@@ -350,8 +448,7 @@ class GoogleCalendarTrigger(threading.Thread):
 
         self.fired_trigger_list = fired_trigger_list
         self._events = dict()
-        self.device_updated = True
-        self.task_time = datetime.now()
+        self.reload_calendar = True
 
     #-------------------------------------------------------------------------------
     def run(self):
@@ -359,7 +456,12 @@ class GoogleCalendarTrigger(threading.Thread):
         while not self.cancelled:
             try:
                 task = self.queue.get(True,5)
-                self.do_evaluation()
+                if task == 'evaluate':
+                    self.do_evaluation()
+                elif task == 'cancel':
+                    self.cancelled = True
+                else:
+                    self.logger.error(u'"{}" unrecognized task "{}"'.format(self.name,task))
             except Queue.Empty:
                 pass
             except Exception as e:
@@ -374,12 +476,10 @@ class GoogleCalendarTrigger(threading.Thread):
     #-------------------------------------------------------------------------------
     def cancel(self):
         """End this thread"""
-        self.cancelled = True
+        self.queue.put('cancel')
 
     #-------------------------------------------------------------------------------
-    def queue_evaluation(self, device_updated=False):
-        if device_updated:
-            self.device_updated = True
+    def queue_evaluation(self):
         self.queue.put('evaluate')
 
     #-------------------------------------------------------------------------------
@@ -406,23 +506,22 @@ class GoogleCalendarTrigger(threading.Thread):
                         self.logger.debug(u'Fire trigger "{}" for event "{}"'.format(self.name,event['summary']))
                         self.fired_trigger_list.append(event_id)
                         indigo.trigger.execute(self.id)
-        self.logger.debug(u'Trigger "{}": {} events, {} pending, {} matched, {} too late, {} fired'.format(self.name,len(self.events),ct_pending,ct_matched,ct_too_late,ct_fired))
+        self.logger.debug(u'Evaluate trigger "{}": {} events, {} pending, {} matched, {} too late, {} fired'.format(self.name,len(self.events),ct_pending,ct_matched,ct_too_late,ct_fired))
 
 
     #-------------------------------------------------------------------------------
     @property
     def events(self):
-        if self.device_updated:
+        if self.reload_calendar:
             # grab the latest download of events
             calendar_dev = indigo.devices[self.calendar_id]
-            self.logger.debug(u'{}'.format(calendar_dev.name))
             self._events = json.loads(calendar_dev.states['event_data'])
-            self.logger.debug(u'Trigger "{}" updated event list'.format(self.name))
+            self.logger.debug(u'Trigger "{}" updated event list from "{}"'.format(self.name,calendar_dev.name))
             # prune the list of previously-fired triggers
             for event_id in self.fired_trigger_list:
                 if event_id not in self._events:
                     self.fired_trigger_list.remove(event_id)
-            self.device_updated = False
+            self.reload_calendar = False
         return self._events
 
 

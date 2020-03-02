@@ -41,12 +41,12 @@ You will get an error:
 
 #### 5. Authorize access to your google calendar
 
-+ Reload the plugin and hopefully get no errors this time.
++ Reload the plugin.
 + Select 'Authorize Access' from the plugin menu.  This should open a web browser where you can grant access.
 
 ## Use
 
-1. Create a 'Google Calendar' indigo device for each calendar you want to trigger from.
+1. Create a 'Google Calendar Device' indigo device for each calendar you want to trigger from.
 2. Create triggers to fire before/after certain calendar events occur.
 
 ## Misc Info

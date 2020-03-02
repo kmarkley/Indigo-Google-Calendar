@@ -4,6 +4,10 @@
         <Name>Authorize Access</Name>
         <CallbackMethod>complete_oauth_flow</CallbackMethod>
     </MenuItem>
+    <MenuItem id='updateCalendarList'>
+        <Name>Update Calendar List</Name>
+        <CallbackMethod>get_calendars</CallbackMethod>
+    </MenuItem>
     <MenuItem id='debugSeperator' type='separator' />
     <MenuItem id='toggleDebug'>
         <Name>Toggle Debugging</Name>
