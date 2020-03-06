@@ -27,7 +27,7 @@ except ImportError:
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 CLIENT_CONFIG_FILENAME = 'google_calendar_client_configuration.json'
-CREDENTIAL_FILENAME = 'google_calendar_credential.json'
+CREDENTIAL_FILENAME = 'google_calendar_credentials.json'
 
 LOOK_BACK_DAYS = 7
 LOOK_AHEAD_DAYS = 30
