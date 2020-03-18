@@ -7,6 +7,9 @@
 				<Label>Calendar Device:</Label>
 				<List class='indigo.devices' filter='self'/>
 			</Field>
+			<Field id='space1' type='label'>
+				<Label> </Label>
+			</Field>
 			<Field id='searchField' type='menu' defaultValue='summary'>
 				<Label>Search Field:</Label>
 				<List>
@@ -20,6 +23,9 @@
 			<Field id='searchHelp' type='label' fontSize='small' alignWithControl='true'>
 				<Label>Searches are case insensitive. Leave blank to trigger on every event.</Label>
 			</Field>
+			<Field id='space2' type='label'>
+				<Label> </Label>
+			</Field>
 			<Field id='timeField' type='menu' defaultValue='start'>
 				<Label>Time Field:</Label>
 				<List>
@@ -32,6 +38,16 @@
 			</Field>
 			<Field id='timeHelp' type='label' fontSize='small' alignWithControl='true'>
                 <Label>Use a negative value to trigger after the start/end time.</Label>
+            </Field>
+			<Field id='space3' type='label'>
+				<Label> </Label>
+			</Field>
+			<Field id='variableID' type='menu' defaultValue='0'>
+				<Label>Variable:</Label>
+				<List class='self' method='getVariableList' />
+			</Field>
+			<Field id='variableHelp' type='label' fontSize='small' alignWithControl='true'>
+                <Label>Choose a variable to save the event summary.</Label>
             </Field>
 		</ConfigUI>
 	</Event>

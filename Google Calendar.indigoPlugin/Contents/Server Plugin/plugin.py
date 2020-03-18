@@ -129,8 +129,8 @@ class Plugin(indigo.PluginBase):
                             self.reloadTriggerCalendar(instance_id)
 
                 # evaluate triggers
-                for trigger in self.trigger_dict.values():
-                    trigger.queue_evaluation()
+                for trigger_instance in self.trigger_dict.values():
+                    trigger_instance.queue_evaluation()
 
                 self.sleep(TRIGGER_LOOP_SECONDS - (time.time() - loop_time))
 
@@ -189,10 +189,10 @@ class Plugin(indigo.PluginBase):
     #-------------------------------------------------------------------------------
     def triggerStopProcessing(self, trigger):
         if trigger.id in self.trigger_dict:
-            instance = self.trigger_dict[trigger.id]
-            self.fired_trigger_dict[trigger.id] = instance.fired_trigger_list
-            instance.cancel()
-            while instance.is_alive():
+            trigger_instance = self.trigger_dict[trigger.id]
+            self.fired_trigger_dict[trigger.id] = trigger_instance.fired_trigger_list
+            trigger_instance.cancel()
+            while trigger_instance.is_alive():
                 time.sleep(0.1)
             del self.trigger_dict[trigger.id]
 
@@ -225,21 +225,28 @@ class Plugin(indigo.PluginBase):
             return (True, valuesDict)
 
     #-------------------------------------------------------------------------------
+    # trigger config callback
+    def getVariableList(self, filter='', valuesDict=dict(), typeId='', targetId=0):
+        variableList = [(var.id,var.name) for var in indigo.variables.iter()]
+        variableList.append((0,"- none -"))
+        return variableList
+
+    #-------------------------------------------------------------------------------
     def reloadTriggerCalendar(self, device_id=None):
-        for instance in self.trigger_dict.values():
-            if (device_id == None) or (device_id == instance.calendar_id):
-                instance.reload_calendar = True
+        for trigger_instance in self.trigger_dict.values():
+            if (device_id == None) or (device_id == trigger_instance.calendar_id):
+                trigger_instance.reload_calendar = True
 
     #-------------------------------------------------------------------------------
     # action control
     #-------------------------------------------------------------------------------
     def actionControlUniversal(self, action, device):
-        instance = self.device_dict[device.id]
+        device_instance = self.device_dict[device.id]
 
         # STATUS REQUEST
         if action.deviceAction == indigo.kUniversalAction.RequestStatus:
             self.logger.info('"{}" status update'.format(device.name))
-            instance.update()
+            device_instance.update()
             self.reloadTriggerCalendar(device.id)
         # UNKNOWN
         else:
@@ -443,6 +450,7 @@ class GoogleCalendarTrigger(threading.Thread):
         self.search_field = trigger.pluginProps.get('searchField',u'')
         self.time_count   = int(trigger.pluginProps.get('timeCount','0'))
         self.time_field   = trigger.pluginProps.get('timeField',u'')
+        self.variable_id  = int(trigger.pluginProps.get('variableID','0'))
 
         self.logger       = logger
 
@@ -503,8 +511,14 @@ class GoogleCalendarTrigger(threading.Thread):
                         ct_too_late += 1
                     elif (now >= time_to_fire):
                         ct_fired += 1
-                        self.logger.debug(u'Fire trigger "{}" for event "{}"'.format(self.name,event['summary']))
+                        self.logger.debug(u'Fire trigger "{}" for event "{:.20}"'.format(self.name,event['summary']))
                         self.fired_trigger_list.append(event_id)
+                        if self.variable_id:
+                            try:
+                                self.logger.debug(u'Save event "{:.20}" to variable "{}"'.format(event['summary'],indigo.variables[self.variable_id].name))
+                                indigo.variable.updateValue(self.variable_id, event['summary'])
+                            except:
+                                self.logger.error(u'Unable to save event "{:.20}" to variable id {} (variable may not exist)'.format(event['summary'],self.variable_id))
                         indigo.trigger.execute(self.id)
         self.logger.debug(u'Evaluate trigger "{}": {} events, {} pending, {} matched, {} too late, {} fired'.format(self.name,len(self.events),ct_pending,ct_matched,ct_too_late,ct_fired))
 

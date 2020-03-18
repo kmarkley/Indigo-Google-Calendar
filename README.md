@@ -20,23 +20,22 @@ So there!
 See here for reference and help: https://forums.indigodomo.com/viewtopic.php?f=107&t=19129&p=145969&hilit=virtualenv#p145969
 
 Should be something like:
-```
-sudo easy_install pip
-sudo pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib --ignore-installed six
-```
+
+    sudo easy_install pip  
+    sudo pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib --ignore-installed six
 
 #### 3. Install the plugin
 You will get an error:
+
 + If the error says you need to install modules, go back and fix step 2
 + If the error says you need to copy a file, you're ok for now.
 
 #### 4. Move the credential file downloaded above
+
 + Rename the file 'google_calendar_client_configuration.json'
 + Move it to the plugin preference folder created when you enabled the plugin
 
-```
-/Library/Application Support/Perceptive Automation/Indigo 7.4/Preferences/Plugins/com.morris.google-calendar/
-```
+`/Library/Application Support/Perceptive Automation/Indigo 7.4/Preferences/Plugins/com.morris.google-calendar/`  
 (The indigo version number might be different)
 
 #### 5. Authorize access to your google calendar
