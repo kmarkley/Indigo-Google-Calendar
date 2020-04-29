@@ -117,8 +117,8 @@ class Plugin(indigo.PluginBase):
                             next_initialize_retry = loop_time + INITIALIZE_RETRY_MINUTES*60
 
                 if self.initialized:
-                    # update list of calendars
                     if loop_time > next_calendar_list_update:
+                        # update list of calendars
                         self.get_calendars()
                         next_calendar_list_update = loop_time + CALENDAR_LIST_UPDATE_HOURS*60*60
 
@@ -236,6 +236,7 @@ class Plugin(indigo.PluginBase):
         for trigger_instance in self.trigger_dict.values():
             if (device_id == None) or (device_id == trigger_instance.calendar_id):
                 trigger_instance.reload_calendar = True
+
 
     #-------------------------------------------------------------------------------
     # action control
@@ -448,9 +449,9 @@ class GoogleCalendarTrigger(threading.Thread):
         self.calendar_id  = int(trigger.pluginProps['calendarID'])
         self.search_words = trigger.pluginProps.get('searchWords',u'')
         self.search_field = trigger.pluginProps.get('searchField',u'')
-        self.time_count   = int(trigger.pluginProps.get('timeCount','0'))
+        self.time_count   = zint(trigger.pluginProps.get('timeCount','0'))
         self.time_field   = trigger.pluginProps.get('timeField',u'')
-        self.variable_id  = int(trigger.pluginProps.get('variableID','0'))
+        self.variable_id  = zint(trigger.pluginProps.get('variableID','0'))
 
         self.logger       = logger
 
@@ -472,12 +473,9 @@ class GoogleCalendarTrigger(threading.Thread):
                     self.logger.error(u'"{}" unrecognized task "{}"'.format(self.name,task))
             except Queue.Empty:
                 pass
-            except Exception as e:
+            except BaseException as e:
                 msg = u'"{}" thread error \n{}'.format(self.name, e)
-                if self.plugin.debug:
-                    self.logger.exception(msg)
-                else:
-                    self.logger.error(msg)
+                self.logger.error(msg)
         else:
             self.logger.debug(u'"{}" thread cancelled'.format(self.name))
 
@@ -493,7 +491,7 @@ class GoogleCalendarTrigger(threading.Thread):
     #-------------------------------------------------------------------------------
     def do_evaluation(self):
         # now = datetime.now()
-        #https://stackoverflow.com/questions/4530069/how-do-i-get-a-value-of-datetime-today-in-python-that-is-timezone-aware/4530166#4530166
+        # https://stackoverflow.com/questions/4530069/how-do-i-get-a-value-of-datetime-today-in-python-that-is-timezone-aware/4530166#4530166
         now = datetime.now(pytz.utc)
         ct_pending = ct_matched = ct_too_late = ct_fired = 0
         for event_id,event in self.events.items():
@@ -504,7 +502,7 @@ class GoogleCalendarTrigger(threading.Thread):
                 if self.search_words in event[self.search_field]:
                     ct_matched += 1
                     # check the time
-                    time_event = dateutil.parser.parse(event[self.time_field])
+                    time_event = dateutil.parser.parse(event[self.time_field]).replace(tzinfo=pytz.utc)
                     time_to_fire = time_event - timedelta(minutes=self.time_count)
                     time_too_late = time_to_fire + timedelta(minutes=TOO_LATE_AFTER_MINUTES)
                     if (now >= time_too_late):
@@ -515,8 +513,8 @@ class GoogleCalendarTrigger(threading.Thread):
                         self.fired_trigger_list.append(event_id)
                         if self.variable_id:
                             try:
-                                self.logger.debug(u'Save event "{:.20}" to variable "{}"'.format(event['summary'],indigo.variables[self.variable_id].name))
                                 indigo.variable.updateValue(self.variable_id, event['summary'])
+                                self.logger.debug(u'Save event "{:.20}" to variable "{}"'.format(event['summary'],indigo.variables[self.variable_id].name))
                             except:
                                 self.logger.error(u'Unable to save event "{:.20}" to variable id {} (variable may not exist)'.format(event['summary'],self.variable_id))
                         indigo.trigger.execute(self.id)
@@ -542,3 +540,6 @@ class GoogleCalendarTrigger(threading.Thread):
 ################################################################################
 # Utilities
 ################################################################################
+def zint(value):
+    try: return int(value)
+    except: return 0
