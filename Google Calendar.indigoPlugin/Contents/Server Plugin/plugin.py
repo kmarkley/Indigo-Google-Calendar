@@ -490,9 +490,8 @@ class GoogleCalendarTrigger(threading.Thread):
 
     #-------------------------------------------------------------------------------
     def do_evaluation(self):
-        # now = datetime.now()
-        # https://stackoverflow.com/questions/4530069/how-do-i-get-a-value-of-datetime-today-in-python-that-is-timezone-aware/4530166#4530166
         now = datetime.now(pytz.utc)
+        offset = now - datetime.now().replace(tzinfo=pytz.utc) # utc offset for current system time
         ct_pending = ct_matched = ct_too_late = ct_fired = 0
         for event_id,event in self.events.items():
             # each trigger should only fire once per event
@@ -502,7 +501,9 @@ class GoogleCalendarTrigger(threading.Thread):
                 if self.search_words in event[self.search_field]:
                     ct_matched += 1
                     # check the time
-                    time_event = dateutil.parser.parse(event[self.time_field]).replace(tzinfo=pytz.utc)
+                    time_event = dateutil.parser.parse(event[self.time_field])
+                    if time_event.tzinfo is None:
+                        time_event = time_event.replace(tzinfo=pytz.utc) + offset
                     time_to_fire = time_event - timedelta(minutes=self.time_count)
                     time_too_late = time_to_fire + timedelta(minutes=TOO_LATE_AFTER_MINUTES)
                     if (now >= time_too_late):
