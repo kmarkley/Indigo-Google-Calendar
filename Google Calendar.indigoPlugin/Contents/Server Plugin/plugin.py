@@ -262,7 +262,7 @@ class Plugin(indigo.PluginBase):
             self.calendar_api = build('calendar', 'v3', credentials=self.credentials)
             self.initialized = True
         except Exception as e:
-            self.logger.error('Google API client failed to initialize')
+            self.logger.error('Google API client failed to initialize - will retry in {} minutes'.format(INITIALIZE_RETRY_MINUTES))
             self.logger.debug(u'{}: {}'.format(type(e),e))
             self.initialized = False
         return self.initialized
@@ -338,7 +338,7 @@ class Plugin(indigo.PluginBase):
                                                    singleEvents=True,
                                                    orderBy='startTime').execute()
         except Exception as e:
-            self.logger.error(u'Failed to download events')
+            self.logger.warn(u'Calendar API call failed')
             self.logger.debug(u'{}: {}'.format(type(e),e))
             self.initialized = False
 
@@ -363,7 +363,7 @@ class Plugin(indigo.PluginBase):
             if value:
                 self.logger.info(u'Google API access initialized')
             else:
-                self.logger.error(u'Google API access not initialized')
+                self.logger.warn(u'Google API access not initialized - attempting reauthorization')
     initialized = property(_initialized_get, _initialized_set)
 
 ################################################################################
@@ -427,7 +427,7 @@ class GoogleCalendarDevice(object):
         except Exception as e:
             self.states['online']        = False
             self.states['onOffState']    = False
-            self.logger.error(u'Failed to download events from calendar "{}" for device "{}"'.format(self.calendar_name, self.device.name))
+            self.logger.warn(u'Failed to download events from calendar "{}" for device "{}"'.format(self.calendar_name, self.device.name))
             self.logger.debug(u'{}: {}'.format(type(e),e))
         self.device.updateStatesOnServer([{'key':key,'value':value} for key,value in self.states.items()])
         self.last_update = time.time()
