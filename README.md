@@ -21,8 +21,7 @@ See here for reference and help: https://forums.indigodomo.com/viewtopic.php?f=1
 
 Should be something like:
 
-    sudo easy_install pip  
-    sudo pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib --ignore-installed six
+    pip3 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib pytz
 
 #### 3. Install the plugin
 You will get an error:
